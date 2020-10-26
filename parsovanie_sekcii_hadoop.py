@@ -1,10 +1,29 @@
-##urllib.request.urlretrieve("http://kdd.ics.uci.edu/databases/kddcup99/kddcup.data_10_percent.gz", "/tmp/kddcup_data.gz")
-##dbutils.fs.mv("file:/tmp/kddcup_data.gz", "dbfs:/kdd/kddcup_data.gz")
-##display(dbutils.fs.ls("dbfs:/kdd"))
+############
+############ DOWNLOAD
+############
 
-################################################################
-################################################################ PARSOVANIE
-################################################################
+import os, os.path
+import urllib.request
+import bz2
+
+if not os.path.exists("tmp"):
+    os.mkdir("tmp")
+
+print("checking wiki dump file...")
+
+if not os.path.exists("tmp/skwiki-latest-pages-articles-multistream.xml.bz2"):
+    print("downloading wiki dump file...")
+    urllib.request.urlretrieve("https://dumps.wikimedia.org/skwiki/latest/skwiki-latest-pages-articles-multistream.xml.bz2", "tmp/skwiki-latest-pages-articles-multistream.xml.bz2")
+
+if not os.path.exists("tmp/skwiki-20201001-pages-articles-multistream.xml"):
+    print("extracting wiki dump file...")
+    with open("tmp/skwiki-20201001-pages-articles-multistream.xml", 'wb') as new_file, bz2.BZ2File("tmp/skwiki-latest-pages-articles-multistream.xml.bz2", 'rb') as file:
+        for data in iter(lambda : file.read(100 * 1024), b''):
+            new_file.write(data)
+
+############
+############ PARSOVANIE
+############
 
 import re
 import urllib.request
@@ -21,7 +40,7 @@ def parse_sec_redirs(text):
 def parse_redirs(row):
     return row.redirect._title if row.redirect != None else ()
 
-print("creating session...")
+print("creating spark session...")
 
 spark = SparkSession\
         .builder\
@@ -35,7 +54,7 @@ wikidump_df = spark.read \
     .format("com.databricks.spark.xml") \
     .option("rootTag", "mediawiki") \
     .option("rowTag", "page") \
-    .load("skwiki-20201001-pages-articles-multistream.xml")
+    .load("tmp/skwiki-20201001-pages-articles-multistream.xml")
 
 print("removing empty pages...")
 
@@ -73,11 +92,10 @@ texts_rdd = wikidump_rdd \
 
 texts = texts_rdd.collect()
 
-##############################################################
-############################################################## VYHLADAVANIE
-##############################################################
+############
+############ VYHLADAVANIE
+############
 
-import os, os.path
 from whoosh import index    
 from whoosh.fields import Schema, TEXT, KEYWORD, ID, STORED
 from whoosh.analysis import StemmingAnalyzer
@@ -87,15 +105,13 @@ schema = Schema(title=ID(stored=True),
                 text=TEXT(analyzer=StemmingAnalyzer()),
                 tags=KEYWORD)
 
-print("creating index...")
+print("creating reversed index...")
 
 if not os.path.exists("indexdir"):
     os.mkdir("indexdir")
     
 ix = index.create_in("indexdir", schema)
 writer = ix.writer()
-
-print("writing indices...")
 
 for text in texts: 
     writer.add_document(title=text[0], text=text[1], tags=u"short")
