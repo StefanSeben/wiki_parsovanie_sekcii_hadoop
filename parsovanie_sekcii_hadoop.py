@@ -37,8 +37,15 @@ def parse_sec_redirs(text):
         sec_names.append(f[3]);
     return sec_names
 
-def parse_redirs(row):
-    return row.redirect._title if row.redirect != None else ()
+def parse_redirs(redirect):
+    return redirect._title if redirect != None else ()
+
+def get_from(ptitle, redirs):
+    r_from = []
+    for redir in redirs:
+        if ptitle == redirs[1] or ptitle in redirs[2]:
+            r_from.append(redirs[0])
+    return r_from
 
 print("creating spark session...")
 
@@ -48,7 +55,7 @@ spark = SparkSession\
         .config("packages", "com.databricks:spark-xml_2.11:0.10.0") \
         .getOrCreate()
 
-print("reading data...")
+print("parsing dump file...")
 
 wikidump_df = spark.read \
     .format("com.databricks.spark.xml") \
@@ -60,35 +67,19 @@ print("removing empty pages...")
 
 wikidump_rdd = wikidump_df.rdd.filter(lambda row: row.revision != None and row.revision.text != None and row.revision.text._VALUE != None)
 
-print("parsing sections...")
+print("parsing sections and redirects...")
 
-sec_redir_aa = wikidump_rdd \
-               .map(lambda row: parse_sec_redirs(row.revision.text._VALUE)) \
-               .filter(lambda row: row != []) \
-               .collect()
-
-print("parsing redirects...")
-
-redirs = wikidump_rdd \
-        .map(lambda x: parse_redirs(x)) \
-        .filter(lambda row: row != ()) \
-        .collect()
-
-print("merging parsed sections and redirects...")
-
-redir_secs = []
-for aa in sec_redir_aa:
-    for a in aa:
-        redir_secs.append(a)
-        
-for redir in redirs:
-    redir_secs.append(redir)
+sec_redirs = wikidump_rdd \
+             .map(lambda row: (row.title, row.redirect, parse_sec_redirs(row.revision.text._VALUE))) \
+             .map(lambda row: (row[0], parse_redirs(row[1]), row[2])) \
+             .filter(lambda row: row[2] != [] or row[1] != ()) \
+             .collect()
         
 print("extracting texts...")
 
 texts_rdd = wikidump_rdd \
-        .filter(lambda row: row.title in redir_secs) \
-        .map(lambda row: (row.title, row.revision.text._VALUE))
+        .map(lambda row: (row.title, get_from(row.title, sec_redirs), row.revision.text._VALUE)) \
+        .filter(lambda row: row[1] != [])
 
 texts = texts_rdd.collect()
 
@@ -102,6 +93,7 @@ from whoosh.analysis import StemmingAnalyzer
 from whoosh.qparser import QueryParser
 
 schema = Schema(title=ID(stored=True),
+                r_from=TEXT(stored=True),
                 text=TEXT(analyzer=StemmingAnalyzer()),
                 tags=KEYWORD)
 
@@ -114,7 +106,7 @@ ix = index.create_in("indexdir", schema)
 writer = ix.writer()
 
 for text in texts: 
-    writer.add_document(title=text[0], text=text[1], tags=u"short")
+    writer.add_document(title=text[0], r_from=' '.join(map(str, text[1] + ", ")), text=text[2], tags=u"short")
 writer.commit()
 
 print("prepared to parse query")
