@@ -9,3 +9,6 @@ xml_parser
 parsovanie_sekcii_hadoop.py
 mahout
 WikiSectionParser\target
+*\.idea
+*\out
+*\*.iml
