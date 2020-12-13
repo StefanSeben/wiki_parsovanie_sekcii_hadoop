@@ -47,19 +47,19 @@ public class WikiSectionParser {
             parseRecursively(page, sections, regex);
         }
 
-        private static void parseRecursively(WikiPage page, List<WikiPage> sections, Stack<String> regex)
-        {
+        private static void parseRecursively(WikiPage page, List<WikiPage> sections, Stack<String> regex) throws UnsupportedEncodingException {
             Matcher secMatcher = Pattern.compile(regex.pop())
                     .matcher(page.getPageText());
 
-            WikiPage newSection= null;
+            WikiPage newSection = null;
+            String sectionTitle = null;
             int s = 0,e = -1;
             while (secMatcher.find()) {
                 if (s > 0) {
                     e = secMatcher.start();
 
-                    //nastav atributy novej sekcie
-                    //...
+                    newSection = new WikiPage();
+                    newSection.setPageTitle(sectionTitle);
                     newSection.setPageText(page.getPageText().substring(s, e));
 
                     if (!regex.isEmpty()) {
@@ -71,11 +71,33 @@ public class WikiSectionParser {
                     sections.add(newSection);
                 }
 
+                sectionTitle = (page.getPageTitle()
+                        + "#"
+                        + secMatcher.group(0)
+                        .replaceAll("=","")
+                        .replaceAll("^\\s+","")
+                        .replaceAll("\\s+$","")
+                );
+                sectionTitle = decodeUndecodedUTF(stripTitle(sectionTitle));
+
                 s = secMatcher.end();
             }
 
-            //preparsuj rekurzívne ešte od konca poslednej zhody po koniec textu
-            //...
+            if (s > 0) {
+                e = page.getPageText().length();
+
+                newSection = new WikiPage();
+                newSection.setPageTitle(sectionTitle);
+                newSection.setPageText(page.getPageText().substring(s, e));
+
+                if (!regex.isEmpty()) {
+                    parseRecursively(new WikiPage(page.getPageTitle(), newSection.getPageText())
+                            , sections
+                            , (Stack<String>) regex.clone());
+                }
+
+                sections.add(newSection);
+            }
         }
 
         public static String parseRedirectPages(WikiPage page) {
