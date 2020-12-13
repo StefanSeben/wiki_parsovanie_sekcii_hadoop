@@ -47,19 +47,19 @@ public class WikiSectionParser {
             parseRecursively(page, sections, regex);
         }
 
-        private static void parseRecursively(WikiPage page, List<WikiPage> sections, Stack<String> regex) throws UnsupportedEncodingException {
+        private static void parseRecursively(WikiPage page, List<WikiPage> sections, Stack<String> regex)
+        {
             Matcher secMatcher = Pattern.compile(regex.pop())
                     .matcher(page.getPageText());
 
-            WikiPage newSection;
-            String sectionTitle = null;
+            WikiPage newSection= null;
             int s = 0,e = -1;
             while (secMatcher.find()) {
                 if (s > 0) {
                     e = secMatcher.start();
 
-                    newSection = new WikiPage();
-                    newSection.setPageTitle(sectionTitle);
+                    //nastav atributy novej sekcie
+                    //...
                     newSection.setPageText(page.getPageText().substring(s, e));
 
                     if (!regex.isEmpty()) {
@@ -71,40 +71,18 @@ public class WikiSectionParser {
                     sections.add(newSection);
                 }
 
-                sectionTitle = (page.getPageTitle()
-                        + "#"
-                        + secMatcher.group(0)
-                        .replaceAll("=","")
-                        .replaceAll("^\\s+","")
-                        .replaceAll("\\s+$","")
-                );
-                sectionTitle = decodeUndecodedUTF(stripTitle(sectionTitle));
-
                 s = secMatcher.end();
             }
 
-            if (s > 0) {
-                e = page.getPageText().length();
-
-                newSection = new WikiPage();
-                newSection.setPageTitle(sectionTitle);
-                newSection.setPageText(page.getPageText().substring(s, e));
-
-                if (!regex.isEmpty()) {
-                    parseRecursively(new WikiPage(page.getPageTitle(), newSection.getPageText())
-                            , sections
-                            , (Stack<String>) regex.clone());
-                }
-
-                sections.add(newSection);
-            }
+            //preparsuj rekurzívne ešte od konca poslednej zhody po koniec textu
+            //...
         }
 
         public static String parseRedirectPages(WikiPage page) {
             String redirectedPage = "";
 
             Matcher m = Pattern.compile("(?i)^(\\s*#redirect\\s*\\[\\[(.+?#.+?)\\]\\])"
-                    + "|(\\s*#presmeruj\\s*\\[\\[(.+?#.+?)\\]\\])") //\s*$
+                    + "|(\\s*#presmeruj\\s*\\[\\[(.+?#.+?)\\]\\])")
                     .matcher(page.getPageText());
             if (m.find()) {
                 redirectedPage = (m.group(2) == null ? m.group(4) : m.group(2));
@@ -215,7 +193,6 @@ public class WikiSectionParser {
                     .replaceAll("''", "")
                     .replaceAll("'''", "")
                     .replaceAll("^\\s+","")
-                    .replaceAll("\\s+$","")
                     .replaceAll("\\s+$","")
                     .replaceAll("\\p{Cc}", "")
             );

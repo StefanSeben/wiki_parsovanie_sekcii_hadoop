@@ -20,16 +20,11 @@ import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.RAMDirectory;
 import org.apache.lucene.store.SimpleFSDirectory;
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileReader;
-import java.io.IOException;
+import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Scanner;
+import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -41,6 +36,11 @@ public class WikiTextSearch
     private static final String[] VALID_FORMAT_NAMES = {"redirsFrom", "pageTitle","sectionTitle","sectionText","redirsCount"};
     private static final String DEFAULT_SEARCH_FIELD = "sectionText";
     private static final String DELIMETER = "█";
+    private static final int HITS_PER_PAGE = 10;
+
+    private static final int AVG_SENTENCE_LENGTH = 85;
+    private static final int TEST_SENTENCE_LENGTH = 10;
+
 
     public static void main( String[] args ) throws IOException, ParseException {
         StopAnalyzer analyzer = new StopAnalyzer();
@@ -57,32 +57,61 @@ public class WikiTextSearch
                 File f = new File(args[i]);
                 BufferedReader reader = new BufferedReader(new FileReader(f));
 
-                String pageTitle = "";
-                String sectionTitle = "";
-                String sectionText = "";
-                int redirCount = 0;
-                String[] redirsFrom;
+                WikiSection longestText = new WikiSection();
+                WikiSection mostRedirects = new WikiSection();
 
+                float avgTextLength = 0;
+                float avgRedirects = 0;
+                int redirCount = 0;
+                int lessThanSentence = 0;
+                int lessThanTest = 0;
+                int one = 0;
+                int zero = 0;
+                Map<Integer, Integer> redirsCounts = new HashMap<>();
                 int c = 0;
+
+                System.out.println("Creating index for: " + args[i]);
+
                 String line = reader.readLine();
                 while (line != null) {
                     String[] valueSplits = line.split("███");
+                    WikiSection section = new WikiSection();
 
                     try {
                         if (valueSplits.length > 4) {
-                            pageTitle = valueSplits[0].split("\t")[1];
-                            sectionTitle = valueSplits[1];
+                            section.setPageTitle(valueSplits[0].split("\t")[1]);
+                            section.setSectionTitle(valueSplits[1]);
                             redirCount = Integer.parseInt(valueSplits[2]);
 
-                            redirsFrom = new String[redirCount];
                             for (int j = 0; j < redirCount; ++j) {
-                                redirsFrom[j] = valueSplits[3 + j];
+                                section.addRedirFrom(valueSplits[3 + j]);
                             }
 
                             if (3 + redirCount == valueSplits.length - 1) {
-                                sectionText = valueSplits[3 + redirCount];
+                                section.setSectionText(valueSplits[3 + redirCount]);
 
-                                addDoc(w, pageTitle, sectionTitle, sectionText, redirsFrom);
+                                addDoc(w, section);
+
+                                if (section.getSectionText().length() > longestText.getSectionText().length())
+                                    longestText = section;
+                                if (redirCount > mostRedirects.getRedirCount())
+                                    mostRedirects = section;
+                                avgRedirects += redirCount;
+                                avgTextLength += section.getSectionText().length();
+                                if (section.getSectionText().length() < AVG_SENTENCE_LENGTH)
+                                    ++lessThanSentence;
+                                if (section.getSectionText().length() < TEST_SENTENCE_LENGTH)
+                                    ++lessThanTest;
+                                if (section.getSectionText().length() == 1)
+                                    ++one;
+                                if (section.getSectionText().length() == 0)
+                                    ++zero;
+                                if (!redirsCounts.containsKey(redirCount))
+                                    redirsCounts.put(redirCount, 1);
+                                else
+                                    redirsCounts.put(redirCount, redirsCounts.get(redirCount) + 1);
+
+                                ++c;
                             }
                         }
                     } catch (IndexOutOfBoundsException e) {
@@ -92,29 +121,47 @@ public class WikiTextSearch
                     line = reader.readLine();
                 }
 
-
                 reader.close();
                 w.commit();
+
+                avgRedirects /= c;
+                avgTextLength /= c;
+
+                System.out.println("Successfully finished creating index for: " + args[i]);
+                System.out.println("Stats: ");
+                System.out.println("Longest section: " + longestText.getSectionText().length()
+                        + " \"" + longestText.getSectionTitle() + "\" (page: " + longestText.getPageTitle() + ")");
+                System.out.println("Most redirects: " + mostRedirects.getRedirCount()
+                        + " \"" + mostRedirects.getSectionTitle() + "\" (page: " + mostRedirects.getPageTitle() + ")");
+                System.out.println("Avg. section length: " + avgTextLength);
+                System.out.println("Avg. redir count: " + avgRedirects);
+                System.out.println("Sections shorter than avg. sentence length: " + lessThanSentence);
+                System.out.println("Sections shorter than " + TEST_SENTENCE_LENGTH + " characters: " + lessThanTest);
+                System.out.println("Sections with 1 character: " + one);
+                System.out.println("Sections with 0 characters: " + zero);
+
+                FileWriter redirsCountWriter = new FileWriter(args[i] + "redirsCount.txt");
+                for ( Map.Entry<Integer, Integer> redirCountEntry : redirsCounts.entrySet()) {
+                    redirsCountWriter.write(redirCountEntry.getKey() + "\t" + redirCountEntry.getValue() + "\n");
+                }
+                redirsCountWriter.close();
             }
 
             w.close();
         }
 
-        int hitsPerPage = 10;
         IndexReader reader = DirectoryReader.open(index);
         IndexSearcher searcher = new IndexSearcher(reader);
 
         String querystr = "not empty";
 
         Scanner keyboard = new Scanner(System.in);
-        System.out.println("enter query to search: ");
+        System.out.print("enter query to search: ");
         querystr = keyboard.nextLine();
 
         List<String> display = new ArrayList<>();
-        display.add("redirsFrom");
-        display.add("pageTitle");
-        display.add("sectionTitle");
 
+        addAllFormatFields(display);
         setFormatText(display);
 
         int i = 0;
@@ -124,7 +171,7 @@ public class WikiTextSearch
         while (!querystr.toLowerCase().replaceAll("\\s", "").equals("quit")) {
             if (!querystr.equals("") || !luceneQuery.equals("")) {
                 if (querystr.equals("")) {
-                    TopDocs docs = searcher.search(q, i + hitsPerPage);
+                    TopDocs docs = searcher.search(q, i + HITS_PER_PAGE);
                     hits = docs.scoreDocs;
 
                     System.out.println("Found " + (hits.length - i) + " hits for: " + luceneQuery);
@@ -135,7 +182,7 @@ public class WikiTextSearch
                     if (!luceneQuery.isEmpty()) {
                         q = new QueryParser(DEFAULT_SEARCH_FIELD, analyzer).parse(luceneQuery);
 
-                        TopDocs docs = searcher.search(q, hitsPerPage);
+                        TopDocs docs = searcher.search(q, HITS_PER_PAGE);
                         hits = docs.scoreDocs;
 
                         System.out.println("Found " + hits.length + " hits for: " + luceneQuery);
@@ -146,7 +193,7 @@ public class WikiTextSearch
                 if (i > 0 && i == hits.length) {
                     System.out.println("No more results.");
                 }
-                else if (!display.isEmpty()) {
+                else if ( hits.length != 0 && !display.isEmpty()) {
                     System.out.println(format);
 
                     for (; i < hits.length; ++i) {
@@ -160,11 +207,17 @@ public class WikiTextSearch
 
                         System.out.println(toPrint);
                     }
+
+                    if (i % HITS_PER_PAGE == 0)
+                        System.out.println("enter empty query to display more results...");
+                    else
+                        System.out.println("No more results.");
                 }
             }
 
 
-            System.out.println("enter query to search: ");
+            System.out.println();
+            System.out.print("enter query to search: ");
             querystr = keyboard.nextLine();
         }
 
@@ -252,17 +305,18 @@ public class WikiTextSearch
         return luceneQuery;
     }
 
-    private static void addDoc(IndexWriter w, String pageTitle, String sectionTitle, String sectionText, String[] redirsFrom) throws IOException {
+    private static void addDoc(IndexWriter w, WikiSection section) throws IOException {
         Document doc = new Document();
 
-        doc.add(new TextField("pageTitle", pageTitle, Field.Store.YES));
-        doc.add(new TextField("sectionTitle", sectionTitle, Field.Store.YES));
-        doc.add(new TextField("sectionText", sectionText, Field.Store.YES));
-        doc.add(new IntField("redirsCount", redirsFrom.length, Field.Store.YES));
+        doc.add(new TextField("pageTitle", section.getPageTitle(), Field.Store.YES));
+        doc.add(new TextField("sectionTitle", section.getSectionTitle(), Field.Store.YES));
+        doc.add(new TextField("sectionText", section.getSectionText(), Field.Store.YES));
+        doc.add(new IntField("charCount", section.getSectionText().length(), Field.Store.YES));
+        doc.add(new IntField("redirsCount", section.getRedirCount(), Field.Store.YES));
 
         String redirs = "";
-        for (int i = 0; i < redirsFrom.length; ++i)
-            redirs += redirsFrom[i] + "\t";
+        for (String redir : section.getRedirsFrom())
+            redirs += redir + "\t";
 
         doc.add(new TextField("redirsFrom", redirs, Field.Store.YES));
 

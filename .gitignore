@@ -12,3 +12,4 @@ WikiSectionParser\target
 *\.idea
 *\out
 *\*.iml
+*\index*
