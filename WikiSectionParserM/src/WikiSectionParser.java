@@ -27,14 +27,27 @@ import java.util.Stack;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/**
+ * MY class. Parses Wiki XML dump. Extracts texts of sections, which are redirected from a redirect page.
+ * To be used with Hadoop 3.x.x.
+ */
 public class WikiSectionParser {
 
     private static final String REDIRECTED = "-r";
 
+    /**
+     * Mapper class for @WikiSectionParser. Executes the mapping step.
+     */
     public static class WikiSectionMapper extends Mapper<LongWritable, Text, Text, Text>
     {
         private static List<WikiPage> parsedPages = new ArrayList<>();
 
+        /**
+         * Extracts sections from wiki page.
+         * @param page page to parse
+         * @param sections list of parsed sections parsed from @page
+         * @throws UnsupportedEncodingException error while decoding UTF-8 characters
+         */
         public static void parseSections(WikiPage page, List<WikiPage> sections) throws UnsupportedEncodingException {
             Stack<String> regex = new Stack();
 
@@ -47,6 +60,13 @@ public class WikiSectionParser {
             parseRecursively(page, sections, regex);
         }
 
+        /**
+         * Recursively extracts sections from wiki page until regex stack is emptied.
+         * @param page page to parse
+         * @param sections list of parsed sections parsed from @page
+         * @param regex stack of regular expression used to parse @page
+         * @throws UnsupportedEncodingException error while decoding UTF-8 characters
+         */
         private static void parseRecursively(WikiPage page, List<WikiPage> sections, Stack<String> regex) throws UnsupportedEncodingException {
             Matcher secMatcher = Pattern.compile(regex.pop())
                     .matcher(page.getPageText());
@@ -100,6 +120,11 @@ public class WikiSectionParser {
             }
         }
 
+        /**
+         * Parses redirect page and extracts the redirect.
+         * @param page page to parse
+         * @return parsed redirect. returns "" if parsed page is not redirect page to section
+         */
         public static String parseRedirectPages(WikiPage page) {
             String redirectedPage = "";
 
@@ -113,6 +138,12 @@ public class WikiSectionParser {
             return redirectedPage;
         }
 
+        /**
+         * Decodes UTF-8 characters in given text.
+         * @param text text to decode
+         * @return text with decoded UTF-8 characters
+         * @throws UnsupportedEncodingException error while decoding UTF-8 characters
+         */
         public static String decodeUndecodedUTF(String text) throws UnsupportedEncodingException {
             Matcher utfMatcher = Pattern.compile("(?i)((%[0-9a-e][0-9a-e])+)|((.[0-9a-e][0-9a-e])+)").matcher(text);
 
@@ -138,6 +169,11 @@ public class WikiSectionParser {
             return decoded;
         }
 
+        /**
+         * Extracts Wiki anchors from text.
+         * @param text text to parse
+         * @return list of anchors in the text
+         */
         public static String[] extractAnchors(String text) {
             Matcher anchorMatcher = Pattern.compile("(?i)\\{\\{\\s*anchor\\s*\\|(.*?)\\}\\}"
                     + "|\\{\\{\\s*kotva\\s*\\|(.*?)\\}\\}").matcher(text);
@@ -165,6 +201,11 @@ public class WikiSectionParser {
             return res;
         }
 
+        /**
+         * Repalces references with names of references.
+         * @param text text to parse
+         * @return text with references replaced with names of references
+         */
         public static String extractReferences(String text) {
             Matcher referenceMatcher = Pattern.compile(//"(?i)\\[\\[:Category:(.*?)\\]\\]"
                     //+ "|\\[\\[:File:(.*?)\\]\\]|" +
@@ -199,6 +240,11 @@ public class WikiSectionParser {
             return extracted;
         }
 
+        /**
+         * Removes Wiki markup from section title.
+         * @param title title to parse
+         * @return title with removed Wiki markup
+         */
         public static String stripTitle(String title) {
             return extractReferences(title
                     //.replaceAll("(?i)\\[\\[File:.*?\\]\\]", "")
@@ -220,6 +266,13 @@ public class WikiSectionParser {
             );
         }
 
+        /**
+         * Map step. Extracts sections and redirect pages to sections from XML Wiki dump.
+         * @param key id of page
+         * @param text xml wiki page
+         * @param context hadoop execution context
+         * @throws IOException
+         */
         public void map(LongWritable key, Text text, Context context
         ) throws IOException {
             try {
@@ -266,10 +319,22 @@ public class WikiSectionParser {
         }
     }
 
+    /**
+     * Reducer class for @WikiSectionParser. Executes the reducing step.
+     */
     public static class WikiSectionReducer extends Reducer<Text, Text , Text, WikiSectionWritable> {
         WikiSectionWritable res;
         ArrayList<Text> redirs;
 
+        /**
+         * Reduce step. Removes sections that are nor redirected and joins section texts with all redirect pages which
+         * redirect to them.
+         * @param key URI of wiki section
+         * @param parsedSections parsed sections and redirects to sections
+         * @param context hadoop execution context
+         * @throws IOException
+         * @throws InterruptedException
+         */
         public void reduce(Text key, Iterable<Text> parsedSections,
                            Context context
         ) throws IOException, InterruptedException {
